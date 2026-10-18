@@ -14,7 +14,7 @@ optional-dependencies = {crypto = ["cryptography"]}
 
 [project.urls]
 Homepage = "https://legion-api.com/verify-before-connect/"
-Source = "https://github.com/Legion33shadow/legion-mcp"
+Source = "https://github.com/Legion33shadow/legion-guard"
 
 [tool.setuptools]
 packages = ["legion_guard", "legion_guard.vendor"]
