@@ -14,7 +14,7 @@ _H = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _H)
 import _lock as L  # noqa: E402  (legion-lock : vérifieur, trousseau, lockfile)
 T = L.T
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 FIELDS = ("name", "description", "inputSchema")
 ALGO = "sha256(JCS-RFC8785(sorted[{name,description,inputSchema}]))/v2"
 
@@ -147,7 +147,8 @@ def default_sources(server_id=None):
 
 
 class GuardedSession:
-    """Enveloppe une mcp.ClientSession. Au premier list_tools(), compare la liste reçue à chaque source.
+    """Enveloppe une mcp.ClientSession. Au premier list_tools(), compare la liste reçue à chaque source ; aux list_tools()
+    suivants de la même session, compare aussi à la liste du début de session (un serveur peut la changer après quelques appels).
     mode="warn" (défaut) : journalise et rapporte, ne retire RIEN. mode="block" (opt-in) : retire de list_tools() et refuse
     dans call_tool() les outils pour lesquels une source a la PREUVE d'un changement (DIFFERS / nouvel outil) ; une source
     UNKNOWN ou UNAVAILABLE ne bloque jamais (fail-open). Toute exception interne du garde est avalée et journalisée."""
@@ -198,9 +199,42 @@ class GuardedSession:
         r = await self._s.list_tools(*a, **k)
         if self.report is None:
             self._evaluate(r.tools)
+            self._session_fp = self._fp_or_none(r.tools)
+        elif not (a or k.get("cursor") or getattr(k.get("params"), "cursor", None)):   # page 1 seulement : une page suivante n'est pas un changement
+            self._check_session_change(r.tools)
         if self._blocked:
             r.tools = [t for t in r.tools if t.name not in self._blocked]
         return r
+
+    @staticmethod
+    def _fp_or_none(tools):
+        try:
+            return fingerprint(tools)
+        except Exception:
+            return None
+
+    def _check_session_change(self, tools):
+        """Même session, nouveau tools/list : comparaison à la liste vue au début de la session. warn : rapport seulement ;
+        block : retire et refuse les outils modifiés ou nouveaux. Fail-open, comme _evaluate."""
+        try:
+            fp, ref = fingerprint(tools), getattr(self, "_session_fp", None)
+            if ref is None or fp["sha256"] == ref["sha256"]:
+                return
+            ch = sorted(n for n, h in fp["per_tool"].items() if ref["per_tool"].get(n) != h)
+            new = sorted(set(ch) - set(self.report.get("mid_session_changed_tools", [])))
+            if not new:
+                return
+            self.report["verdict"] = "CHANGE_DETECTED"
+            self.report["mid_session_changed_tools"] = sorted(set(self.report.get("mid_session_changed_tools", [])) | set(ch))
+            self.report["changed_tools"] = sorted(set(self.report.get("changed_tools", [])) | set(ch))
+            log.warning("legion-guard: %s: tool list changed during the session %s (mode=%s)", self.report.get("server_id"), new, self.mode)
+            if self.mode == "block":
+                self._blocked |= set(ch)
+                self.report["hidden_tools"] = sorted(self._blocked)
+            if self.on_report:
+                self.on_report(self.report)
+        except Exception as e:
+            log.warning("legion-guard: internal error %s; not blocking", type(e).__name__)
 
     async def call_tool(self, name, *a, **k):
         if self.report is None:
