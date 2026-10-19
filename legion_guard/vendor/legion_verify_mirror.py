@@ -156,6 +156,12 @@ def tile_path(level, n, width=TILE):
 
 
 # ---------- Ed25519 (vérification seule, RFC 8032 §5.1.7, pur Python embarqué ; `cryptography` utilisé s'il est déjà là)
+# Attribution : les fonctions _padd, _pmul, _recover_x, _decode, _encode, ed_verify_pure et le calcul du point de base
+# suivent l'implémentation Python de référence de la RFC 8032, section 6 (S. Josefsson, I. Liusvaara, « Edwards-Curve
+# Digital Signature Algorithm (EdDSA) », IRTF CFRG, janvier 2017, https://www.rfc-editor.org/rfc/rfc8032#section-6).
+# Copyright (c) 2017 IETF Trust and the persons identified as the document authors. All rights reserved.
+# Réutilisation soumise aux IETF Trust Legal Provisions (BCP 78, https://trustee.ietf.org/license-info) ;
+# ce code dérivé n'est pas une création originale de LEGION.
 _P = 2 ** 255 - 19
 _L = 2 ** 252 + 27742317777372353535851937790883648493
 _D = -121665 * pow(121666, _P - 2, _P) % _P
