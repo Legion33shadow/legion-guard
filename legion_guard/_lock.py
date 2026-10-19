@@ -17,7 +17,7 @@ import argparse, base64, datetime, difflib, hashlib, json, os, sys, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "vendor"))
-import legion_tlog_verify as T  # noqa: E402  (vérifieur public, 369/369 vecteurs officiels)
+import legion_tlog_verify as T  # noqa: E402  (vérifieur public ; 336/336 vecteurs publics : https://legion-api.com/tlog/test-vectors/)
 
 try:
     import cryptography  # noqa: F401
