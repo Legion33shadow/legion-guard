@@ -64,3 +64,14 @@ of the LEGION log yet: the only cosigning witness today is run by LEGION itself.
 - Tested with the MCP Python SDK `ClientSession`; frameworks that build on it are not tested yet.
 
 The 0.1 functions (`guard_session`, `evaluate`, `approve`, `python3 -m legion_guard check|approve`) are unchanged.
+
+## Release notes
+
+- **0.2.5** (2026-10-21): requires `mcp>=1.24` (was `mcp>=1.0`). 1.24.0 is the first MCP Python SDK version with
+  `mcp.client.streamable_http.streamable_http_client`, which the CLI uses. With 1.0–1.23.3 the package installed but
+  `python3 -m legion_guard check` failed with an ImportError (measured on 2026-10-21; 0.2.1–0.2.4 declared `mcp>=1.0`).
+  Tested on mcp 1.24.0, 1.30.0, 2.0.0, 2.1.1 and 2.3.0. The library itself does not import `mcp`. GHSA-84m7-p3x7-pcfv
+  concerns MCP servers (fixed in 1.30.0 and 2.2.0); if the same environment also runs servers, use one of those versions.
+  The test servers run on both the 1.x and the 2.x SDK.
+- **0.2.4** (2026-10-21): the vendored mirror verifier accepts the checkpoint note signed under the log's origin name
+  (C2SP) as well as the historical name, same key.
