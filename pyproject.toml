@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "legion-guard"
-version = "0.2.4"
+version = "0.2.5"
 description = "Verify before connect: check the MCP tools your client receives against your approvals and LEGION's signed log"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-dependencies = ["mcp>=1.0"]
+dependencies = ["mcp>=1.24"]
 optional-dependencies = {crypto = ["cryptography"]}
 
 [project.urls]
