@@ -14,7 +14,7 @@ _H = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _H)
 import _lock as L  # noqa: E402  (legion-lock : vérifieur, trousseau, lockfile)
 T = L.T
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 FIELDS = ("name", "description", "inputSchema")
 ALGO = "sha256(JCS-RFC8785(sorted[{name,description,inputSchema}]))/v2"
 

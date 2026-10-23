@@ -11,6 +11,35 @@ tools = await session.list_tools()
 print(session.report["verdict"])     # NO_CHANGE_DETECTED | CHANGE_DETECTED | UNVERIFIED
 ```
 
+## Any MCP client, no code: the stdio proxy
+
+Claude Code, Cursor, Claude Desktop, Codex CLI, Gemini CLI: any client that launches a stdio server can run it through the guard.
+Replace the server command with:
+
+```sh
+python3 -m legion_guard proxy [--server-id io.example/server] [--mode warn|block] -- npx -y @scope/server --flag
+```
+
+or let it rewrite your config for review (it prints, it never writes):
+
+```sh
+python -m legion_guard wrap-config ~/.cursor/mcp.json > mcp.guarded.json
+```
+
+The proxy relays JSON-RPC unchanged and inspects every `tools/list` answer:
+
+- **tool fingerprints** (name, description, inputSchema) against your first-use pin, the list seen at the start of the
+  session, and, with `--server-id`, the list signed by the LEGION log;
+- **tool annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) against their first-seen
+  values. Fingerprints do not cover annotations, but a client may rely on them to decide what runs without asking. A change
+  toward less caution (read-only false→true, destructive true→false, open-world true→false) is reported as a change even
+  when the fingerprint is identical.
+
+`warn` (default) logs to stderr and `~/.cache/legion-guard/proxy-audit.jsonl` and changes nothing. `block` removes changed,
+new or relaxed tools from `tools/list` and answers their `tools/call` with JSON-RPC error `-32001` without reaching the
+server. Guard errors are logged and traffic passes unchanged. Tested end to end with the official MCP Python SDK client
+(`tests/test_proxy.py`); stdio only (HTTP servers are left untouched by `wrap-config`).
+
 ## Try it in about a minute (including the virtualenv + install)
 
 ```sh
@@ -67,6 +96,12 @@ The 0.1 functions (`guard_session`, `evaluate`, `approve`, `python3 -m legion_gu
 
 ## Release notes
 
+- **0.2.6** (2026-10-24): `python -m legion_guard proxy -- CMD` runs any stdio MCP server through the guard, for any client
+  that launches stdio servers; `python -m legion_guard wrap-config FILE` prints a config with its stdio servers wrapped (writes
+  nothing). New signal: tool annotations compared with their first-seen values; a change toward less caution is reported
+  (and blocked in `block` mode) even when the fingerprint is identical. Tested with the MCP Python SDK client (mcp 2.1.1,
+  `tests/test_proxy.py` 17/17) and against `@modelcontextprotocol/server-everything` (13 annotated tools, identical
+  `tools/list` with and without the proxy). The library API and the `check`/`approve` CLI are unchanged.
 - **0.2.5** (2026-10-21): requires `mcp>=1.24` (was `mcp>=1.0`). 1.24.0 is the first MCP Python SDK version with
   `mcp.client.streamable_http.streamable_http_client`, which the CLI uses. With 1.0–1.23.3 the package installed but
   `python3 -m legion_guard check` failed with an ImportError (measured on 2026-10-21; 0.2.1–0.2.4 declared `mcp>=1.0`).

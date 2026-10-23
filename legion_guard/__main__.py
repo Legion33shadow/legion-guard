@@ -1,4 +1,6 @@
 """CLI : python3 -m legion_guard check|approve URL SERVER_ID [--lock FICHIER] [--mode warn|block] [--no-legion]
+      python3 -m legion_guard proxy [--server-id ID] [--mode warn|block] -- CMD [ARGS…]   (proxy stdio, tout client MCP)
+      python3 -m legion_guard wrap-config CONFIG.json [--mode warn|block]               (affiche la config enveloppée)
 check   : se connecte (initialize + tools/list, aucun tools/call), affiche le rapport ; code 0 conforme, 1 écart, 2 erreur
 approve : écrit l'approbation de la liste reçue maintenant dans le lockfile (après revue humaine)"""
 import argparse, asyncio, json, sys
@@ -15,6 +17,11 @@ async def _tools(url):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["proxy"]:
+        from legion_guard import proxy; return proxy.main(argv[1:])
+    if argv[:1] == ["wrap-config"]:
+        from legion_guard import proxy; return proxy.main_wrap_config(argv[1:])
     ap = argparse.ArgumentParser(prog="legion_guard")
     ap.add_argument("cmd", choices=["check", "approve"]); ap.add_argument("url"); ap.add_argument("server_id")
     ap.add_argument("--lock", default=G.L.DEFAULT_LOCK); ap.add_argument("--no-legion", action="store_true")
