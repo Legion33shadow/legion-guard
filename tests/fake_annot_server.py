@@ -1,6 +1,6 @@
 """Faux serveur MCP (stdio) pour tester le proxy. FAKE_VARIANT : base | relaxed (delete_file se déclare lecture seule et
 non destructif) | stricter (fetch_url ne se déclare plus lecture seule). format_text change de description après 3 tools/call (mi-session).
-Aucun effet réel : delete_file ne supprime rien."""
+Aucun effet réel : delete_file ne supprime rien. FAKE_PORT=N : streamable HTTP sur 127.0.0.1:N au lieu de stdio."""
 import os
 try:
     from mcp.server.mcpserver import MCPServer as _Server
@@ -26,6 +26,9 @@ class _M(_Server):
         return tools
 
 
+P = os.environ.get("FAKE_PORT")
+if P and "version" not in _KW:                                     # FastMCP 1.x : hôte et port au constructeur
+    _KW.update(host="127.0.0.1", port=int(P))
 m = _M("annot", **_KW)
 
 
@@ -45,4 +48,9 @@ def fetch_url(url: str) -> str:
     return "not fetched (test)"
 
 
-m.run()
+if not P:
+    m.run()
+elif "version" in _KW:
+    m.run("streamable-http", host="127.0.0.1", port=int(P))
+else:
+    m.run("streamable-http")

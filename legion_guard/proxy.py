@@ -2,7 +2,9 @@
 
 Dans la config MCP du client, on remplace la commande du serveur par :
     python3 -m legion_guard proxy [--server-id ID] [--mode warn|block] -- <commande du serveur> [args…]
-Le proxy lance le serveur, relaie le JSON-RPC ligne à ligne dans les deux sens, et inspecte chaque réponse à tools/list :
+ou, pour un serveur distant (streamable HTTP), le client voit un serveur stdio et le proxy parle HTTP au serveur :
+    python3 -m legion_guard proxy --url https://… [--server-id ID] [--mode warn|block]
+Le proxy lance le serveur (ou s'y connecte), relaie le JSON-RPC ligne à ligne dans les deux sens, et inspecte chaque réponse à tools/list :
   1. empreinte des outils (name, description, inputSchema ; même règle que le journal LEGION) comparée aux sources
      (premier usage local ; journal LEGION signé si --server-id) et à la liste vue en début de session ;
   2. annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) comparées à la première vue de ce serveur :
@@ -11,7 +13,7 @@ Le proxy lance le serveur, relaie le JSON-RPC ligne à ligne dans les deux sens,
 warn (défaut) : rapport sur stderr + journal JSONL, rien n'est modifié. block (opt-in) : les outils modifiés, nouveaux ou à
 annotation relâchée sont retirés de tools/list et leurs tools/call reçoivent une erreur JSON-RPC sans atteindre le serveur.
 Fail-open : toute erreur interne du garde est journalisée, le trafic passe tel quel. Le proxy ne fait aucun tools/call.
-Limites : stdio seulement ; un changement n'est pas une attaque ; rien ici ne certifie qu'un serveur est sûr."""
+Limites : côté client, stdio seulement ; côté serveur, stdio ou streamable HTTP sans en-têtes d'authentification ; un changement n'est pas une attaque ; rien ici ne certifie qu'un serveur est sûr."""
 import hashlib, json, os, subprocess, sys, threading, time
 import legion_guard as G
 
@@ -65,13 +67,14 @@ class HintPins:
 
 
 class Proxy:
-    def __init__(self, cmd, server_id=None, mode="warn", cache=None, use_legion=True, audit=None, out=None, inp=None):
+    def __init__(self, cmd, server_id=None, mode="warn", cache=None, use_legion=True, audit=None, out=None, inp=None, url=None):
         if mode not in ("warn", "block"):
             raise ValueError("mode : warn | block")
         cache = cache or os.path.join(os.path.expanduser("~"), ".cache", "legion-guard")
-        self.cmd, self.mode = cmd, mode
-        # sans identifiant de registre, la référence locale est indexée par la commande exacte du serveur
-        self.sid = server_id or "cmd:" + hashlib.sha256(json.dumps(cmd).encode()).hexdigest()[:16] + ":" + os.path.basename(cmd[0])
+        self.cmd, self.mode, self.url = cmd, mode, url
+        # sans identifiant de registre, la référence locale est indexée par l'URL ou par la commande exacte du serveur
+        self.sid = server_id or ("url:" + url if url else
+                                 "cmd:" + hashlib.sha256(json.dumps(cmd).encode()).hexdigest()[:16] + ":" + os.path.basename(cmd[0]))
         sources = [G.FirstUseSource(os.path.join(cache, "pins.json"))] + ([G.LegionSource()] if server_id and use_legion else [])
         self.guard = G.GuardedSession(None, self.sid, sources, mode)
         self.hints = HintPins(os.path.join(cache, "hints.json"))
@@ -177,7 +180,54 @@ class Proxy:
             else:
                 self._to_client(line)
 
+    async def _run_http(self):
+        """Client stdio <-> serveur streamable HTTP (transport du SDK MCP), mêmes inspections qu'en stdio."""
+        import anyio
+        from pydantic import TypeAdapter
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared.message import SessionMessage
+        from mcp.types import JSONRPCMessage
+        ta = TypeAdapter(JSONRPCMessage)
+
+        def as_dict(m):
+            return m.model_dump(by_alias=True, mode="json", exclude_unset=True)
+
+        async with streamable_http_client(self.url) as (read, write, *_):
+            async def down():
+                async for item in read:
+                    if isinstance(item, Exception):
+                        sys.stderr.write("legion-guard: transport error %s\n" % type(item).__name__); continue
+                    d = as_dict(item.message)
+                    self._to_client(self._inspect_response(d) if "id" in d and "method" not in d else d)
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(down)
+                while True:
+                    line = await anyio.to_thread.run_sync(self.inp.readline)
+                    if not line:
+                        break
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
+                    for x in msg if isinstance(msg, list) else [msg]:
+                        if not isinstance(x, dict):
+                            continue
+                        fwd, direct = self._inspect_request(x)
+                        if direct is not None:
+                            self._to_client(direct)
+                        if fwd:
+                            await write.send(SessionMessage(ta.validate_python(x)))
+                tg.cancel_scope.cancel()
+        return 0
+
     def run(self):
+        if self.url:
+            import anyio
+            try:
+                return anyio.run(self._run_http)
+            except Exception as e:
+                sys.stderr.write("legion-guard: cannot reach %s (%s)\n" % (self.url, type(e).__name__)); return 1
         proc = subprocess.Popen(self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         t = threading.Thread(target=self._pump_server, args=(proc,), daemon=True); t.start()
         try:
@@ -215,12 +265,19 @@ class Proxy:
         return rc
 
 
-def wrap_config(cfg, mode="warn", python=None):
+def wrap_config(cfg, mode="warn", python=None, http=False):
     """Config MCP au format {"mcpServers": {...}} (Claude Code, Cursor, Claude Desktop…) -> même config, chaque serveur stdio
-    passant par le proxy. Ne touche pas aux serveurs HTTP/SSE ni aux serveurs déjà enveloppés. Renvoie (config, enveloppés)."""
+    passant par le proxy ; avec http=True, aussi chaque serveur streamable HTTP sans en-têtes (un en-tête d'authentification
+    ne passe pas par la ligne de commande). Ne touche pas aux serveurs SSE ni aux serveurs déjà enveloppés. Renvoie (config, enveloppés)."""
     cfg = json.loads(json.dumps(cfg))
     done = []
     for name, s in (cfg.get("mcpServers") or {}).items():
+        if (http and isinstance(s, dict) and s.get("type") in ("http", "streamable-http") and s.get("url")
+                and not s.get("headers") and "command" not in s):
+            cfg["mcpServers"][name] = {"command": python or sys.executable,
+                                       "args": ["-m", "legion_guard", "proxy", "--mode", mode, "--url", s["url"]]}
+            done.append(name)
+            continue
         if not isinstance(s, dict) or "command" not in s or s.get("type") in ("http", "sse", "streamable-http"):
             continue
         args = s.get("args") or []
@@ -234,8 +291,15 @@ def wrap_config(cfg, mode="warn", python=None):
 
 def main(argv):
     import argparse
+    if "--url" in argv and "--" not in argv:
+        ap = argparse.ArgumentParser(prog="legion_guard proxy")
+        ap.add_argument("--url", required=True); ap.add_argument("--server-id"); ap.add_argument("--mode", default="warn", choices=["warn", "block"])
+        ap.add_argument("--no-legion", action="store_true"); ap.add_argument("--cache")
+        a = ap.parse_args(argv)
+        return Proxy(None, a.server_id, a.mode, a.cache, not a.no_legion, url=a.url).run()
     if "--" not in argv:
         sys.stderr.write("usage: python3 -m legion_guard proxy [--server-id ID] [--mode warn|block] [--no-legion] -- CMD [ARGS…]\n"
+                         "       python3 -m legion_guard proxy --url URL [--server-id ID] [--mode warn|block] [--no-legion]\n"
                          "       python3 -m legion_guard wrap-config CONFIG.json [--mode warn|block]   (affiche, n'écrit rien)\n")
         return 2
     i = argv.index("--")
@@ -252,8 +316,9 @@ def main_wrap_config(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="legion_guard wrap-config")
     ap.add_argument("config"); ap.add_argument("--mode", default="warn", choices=["warn", "block"])
+    ap.add_argument("--http", action="store_true", help="also wrap streamable HTTP servers without headers")
     a = ap.parse_args(argv)
-    cfg, done = wrap_config(json.load(open(a.config)), a.mode)
+    cfg, done = wrap_config(json.load(open(a.config)), a.mode, http=a.http)
     sys.stderr.write("legion-guard: %d serveur(s) stdio enveloppé(s) : %s ; rien n'est écrit, redirigez la sortie après relecture\n" % (len(done), done))
     print(json.dumps(cfg, indent=2, ensure_ascii=False))
     return 0

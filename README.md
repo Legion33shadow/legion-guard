@@ -20,7 +20,19 @@ Replace the server command with:
 python3 -m legion_guard proxy [--server-id io.example/server] [--mode warn|block] -- npx -y @scope/server --flag
 ```
 
-or let it rewrite your config for review (it prints, it never writes):
+Remote (streamable HTTP) servers too: the client sees a stdio server, the proxy speaks HTTP to the server. With the
+server's registry id, the list it serves is checked against the list signed by the LEGION log:
+
+```sh
+python3 -m legion_guard proxy --url https://mcp.dexpaprika.com/streamable-http --server-id com.dexpaprika/dexpaprika
+```
+
+Measured on 2026-10-24 in Claude Code (`claude mcp add dexpaprika-guarded -- python3 -m legion_guard proxy --url … --server-id …`):
+the 20 tools received match the list LEGION signed on 2026-10-23T17:24:07Z (leaf 34842; record signature, RFC 9162
+inclusion proof and signed head verified from the pinned root key), and tool calls go through.
+
+or let it rewrite your config for review (it prints, it never writes; `--http` also wraps streamable HTTP servers that
+have no headers):
 
 ```sh
 python -m legion_guard wrap-config ~/.cursor/mcp.json > mcp.guarded.json
@@ -38,7 +50,8 @@ The proxy relays JSON-RPC unchanged and inspects every `tools/list` answer:
 `warn` (default) logs to stderr and `~/.cache/legion-guard/proxy-audit.jsonl` and changes nothing. `block` removes changed,
 new or relaxed tools from `tools/list` and answers their `tools/call` with JSON-RPC error `-32001` without reaching the
 server. Guard errors are logged and traffic passes unchanged. Tested end to end with the official MCP Python SDK client
-(`tests/test_proxy.py`); stdio only (HTTP servers are left untouched by `wrap-config`).
+(`tests/test_proxy.py`, `tests/test_proxy_http.py`) and in Claude Code. Not covered: SSE servers, and HTTP servers that need
+headers (an `Authorization` header would have to go on the command line, so `wrap-config` leaves them untouched).
 
 ## Try it in about a minute (including the virtualenv + install)
 
@@ -96,6 +109,10 @@ The 0.1 functions (`guard_session`, `evaluate`, `approve`, `python3 -m legion_gu
 
 ## Release notes
 
+- **0.2.7** (2026-10-24): `proxy --url` for remote streamable HTTP servers (stdio on the client side), with the same checks
+  as stdio; `wrap-config --http`. `LEGION_GUARD_TEST=1` marks requests to the log as tests (`X-Legion-Test` header).
+  Tested: `tests/test_proxy_http.py` 9/9 on a local HTTP server; Claude Code through the proxy to `mcp.dexpaprika.com`,
+  list matching the signed record.
 - **0.2.6** (2026-10-24): `python -m legion_guard proxy -- CMD` runs any stdio MCP server through the guard, for any client
   that launches stdio servers; `python -m legion_guard wrap-config FILE` prints a config with its stdio servers wrapped (writes
   nothing). New signal: tool annotations compared with their first-seen values; a change toward less caution is reported

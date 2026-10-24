@@ -74,7 +74,10 @@ class LegionSource:
         self.witnesses, self.min_witnesses, self.log_vkey = list(witnesses or []), int(min_witnesses), log_vkey
 
     def _get(self, path, raw=False):
-        req = urllib.request.Request(self.base + path, headers={"User-Agent": "legion-guard/0.2"})
+        h = {"User-Agent": "legion-guard/0.2"}
+        if os.environ.get("LEGION_GUARD_TEST") == "1":      # requêtes de test : exclues des compteurs d'usage tiers du journal
+            h["X-Legion-Test"] = "1"
+        req = urllib.request.Request(self.base + path, headers=h)
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             b = r.read(8 << 20)
         return b.decode("utf-8") if raw else json.loads(b)
