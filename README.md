@@ -127,3 +127,10 @@ The 0.1 functions (`guard_session`, `evaluate`, `approve`, `python3 -m legion_gu
   The test servers run on both the 1.x and the 2.x SDK.
 - **0.2.4** (2026-10-21): the vendored mirror verifier accepts the checkpoint note signed under the log's origin name
   (C2SP) as well as the historical name, same key.
+
+## Free and paid resources
+
+- **Free preflight checklist:** [MCP Server Security Preflight Checklist](https://gemmo.gumroad.com/l/uobvcl) — a manual review aid for authentication, transports, tool schemas, execution boundaries and release evidence.
+- **Local diagnostic kit (€29 one-time):** [MCP Security Kit](https://gemmo.gumroad.com/l/izbbg) — three small checks for tool-definition patterns, local HTTP exposure and schema pinning, with bundled self-tests and offline checklists.
+
+`legion-guard` remains free and open source under MIT. The diagnostic kit is optional and does not unlock or change the guard. Neither resource is a security certification; read the limitations before relying on a result.
